@@ -2,7 +2,6 @@ const { google } = require("googleapis");
 const { Readable } = require("stream");
 
 const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID;
-const FOLDER_ID = "1ZqXGLzcLZaiRmAW_gUsKPjWiCQXG21hK";
 
 function getAuth() {
   const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
@@ -44,36 +43,34 @@ exports.handler = async (event) => {
     const drive = google.drive({ version: "v3", auth });
     const sheets = google.sheets({ version: "v4", auth });
 
-    // Convert base64 to buffer
     const fileBuffer = Buffer.from(file_data, "base64");
 
-    // Upload to Drive
+    // Upload dans l'espace du Service Account (pas de parents = quota illimité)
     const driveRes = await drive.files.create({
       requestBody: {
         name: file_name,
-        parents: [FOLDER_ID],
+        // Pas de 'parents' — stocké dans l'espace propre du Service Account
       },
       media: {
         mimeType: mime_type || "application/pdf",
         body: bufferToStream(fileBuffer),
       },
-      fields: "id, webViewLink, webContentLink",
+      fields: "id, webViewLink",
     });
 
     const fileId = driveRes.data.id;
     const viewLink = driveRes.data.webViewLink;
 
-    // Make file readable by anyone with the link
+    // Rendre le fichier accessible à toute personne ayant le lien
     await drive.permissions.create({
       fileId,
       requestBody: { role: "reader", type: "anyone" },
     });
 
-    // Write the Drive link into column J of the Sheets row
-    const range = `'${sheet_name}'!J${row_index + 1}`;
+    // Sauvegarder le lien dans la colonne J du Sheets
     await sheets.spreadsheets.values.update({
       spreadsheetId: SPREADSHEET_ID,
-      range,
+      range: `'${sheet_name}'!J${row_index + 1}`,
       valueInputOption: "USER_ENTERED",
       requestBody: { values: [[viewLink]] },
     });
