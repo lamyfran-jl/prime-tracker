@@ -3,29 +3,28 @@ const { google } = require("googleapis");
 const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID;
 
 const SHEETS_CONFIG = {
-  "Prime Back": { key: "back", label: "PRIME BACK", color: "#2563eb", accent: "#1d4ed8" },
-  "Prime Fit": { key: "fit", label: "PRIME FIT", color: "#16a34a", accent: "#15803d" },
-  "Prime Well": { key: "well", label: "PRIME WELL", color: "#7c3aed", accent: "#6d28d9" },
-  "Mobilier": { key: "mobilier", label: "MOBILIER", color: "#d97706", accent: "#b45309" },
-  "Matériel Info & AV": { key: "av", label: "INFO & AV", color: "#0891b2", accent: "#0e7490" },
-  "Extras AGM Constructions": { key: "agm", label: "AGM CONSTRUCTIONS", color: "#dc2626", accent: "#b91c1c" },
+  "Prime Back": { key: "back", label: "PRIME BACK", color: "#2563eb" },
+  "Prime Fit": { key: "fit", label: "PRIME FIT", color: "#16a34a" },
+  "Prime Well": { key: "well", label: "PRIME WELL", color: "#7c3aed" },
+  "Mobilier": { key: "mobilier", label: "MOBILIER", color: "#d97706" },
+  "Matériel Info & AV": { key: "av", label: "INFO & AV", color: "#0891b2" },
+  "Extras AGM Constructions": { key: "agm", label: "AGM CONSTRUCTIONS", color: "#dc2626" },
 };
 
 function getAuth() {
   const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
   return new google.auth.GoogleAuth({
     credentials,
-    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+    scopes: [
+      "https://www.googleapis.com/auth/spreadsheets",
+      "https://www.googleapis.com/auth/drive",
+    ],
   });
 }
 
 function parseNum(val) {
   if (val === null || val === undefined || val === "") return null;
-  const s = String(val)
-    .replace(/\s/g, "")
-    .replace(/,(?=\d{3})/g, "")
-    .replace(/,/g, ".")
-    .replace(/\.(?=.*\.)/g, "");
+  const s = String(val).replace(/\s/g, "").replace(/,(?=\d{3})/g, "").replace(/,/g, ".").replace(/\.(?=.*\.)/g, "");
   const n = parseFloat(s);
   return isNaN(n) ? null : n;
 }
@@ -33,9 +32,7 @@ function parseNum(val) {
 function parseRows(rows) {
   if (!rows || rows.length < 3) return { sections: [], total_ht: 0, total_ttc: 0 };
 
-  let headerIdx = rows.findIndex((r) =>
-    r.some((c) => String(c).includes("Désignation produit"))
-  );
+  let headerIdx = rows.findIndex((r) => r.some((c) => String(c).includes("Désignation produit")));
   if (headerIdx === -1) headerIdx = 2;
 
   const sections = [];
@@ -54,8 +51,7 @@ function parseRows(rows) {
       sections.push(currentSection);
       continue;
     }
-    if (designation.toLowerCase().includes("sous-total") ||
-        designation.toLowerCase().startsWith("total")) continue;
+    if (designation.toLowerCase().includes("sous-total") || designation.toLowerCase().startsWith("total")) continue;
 
     const item = {
       row_index: i,
@@ -68,12 +64,10 @@ function parseRows(rows) {
       fournisseur:    String(row[6] || "").trim(),
       statut:         String(row[7] || "En attente").trim() || "En attente",
       date_livraison: String(row[8] || "").trim(),
+      bon_commande:   String(row[9] || "").trim(), // Column J
     };
 
-    if (!currentSection) {
-      currentSection = { name: "Général", items: [] };
-      sections.push(currentSection);
-    }
+    if (!currentSection) { currentSection = { name: "Général", items: [] }; sections.push(currentSection); }
     currentSection.items.push(item);
   }
 
@@ -97,7 +91,7 @@ exports.handler = async (event) => {
       try {
         const response = await sheets.spreadsheets.values.get({
           spreadsheetId: SPREADSHEET_ID,
-          range: `'${sheetName}'!A1:I200`,
+          range: `'${sheetName}'!A1:J200`, // Extended to J for bon_commande
         });
         const parsed = parseRows(response.data.values || []);
         result[config.key] = { ...config, sheet_name: sheetName, ...parsed };
@@ -107,10 +101,7 @@ exports.handler = async (event) => {
     }
 
     let grand_total_ht = 0, grand_total_ttc = 0;
-    Object.values(result).forEach((tab) => {
-      grand_total_ht += tab.total_ht || 0;
-      grand_total_ttc += tab.total_ttc || 0;
-    });
+    Object.values(result).forEach((tab) => { grand_total_ht += tab.total_ht || 0; grand_total_ttc += tab.total_ttc || 0; });
 
     return { statusCode: 200, headers, body: JSON.stringify({ tabs: result, grand_total_ht, grand_total_ttc }) };
   } catch (err) {
